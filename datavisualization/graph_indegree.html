@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="d3.js"></script>
+  <style>
+    circle {
+      stroke: black;
+      stroke-width: 1px;
+      fill: Wheat;
+      opacity: 0.5;
+    }
+  </style>
+  <script type="text/javascript">
+    var incomingEdges = new Array();
+    var outgoingEdges = new Array();
+
+    function binary_search(arr, key) {
+      if (arr === undefined || arr == null || arr.length == 0) {
+        return false;
+      }
+
+      var lo = 0, hi = arr.length - 1;
+      while (lo < hi) {
+        var mid = Math.floor((lo + hi) / 2);
+        if (arr[mid] > key) hi = mid - 1;
+        else if (arr[mid] == key) { lo = mid; break; }
+        else lo = mid + 1;
+      }
+      
+      if (arr[lo] == key)return true;
+      return false;
+    }
+
+    function doHighlight(d, index) {
+
+        var numIncomingNeighbours = incomingEdges[index].length;
+        for (var i = 0; i < numIncomingNeighbours; ++i) {
+          var incomingNeighbourElement = d3.select("[id=\"" + incomingEdges[index][i] + "\"]");
+          incomingNeighbourElement.style("fill", "Teal").style("opacity", "1");
+        }
+
+        var numOutgoingNeighbours = outgoingEdges[index].length;
+        for (var i = 0; i < numOutgoingNeighbours; ++i) {
+          var outgoingNeighbourElement = d3.select("[id=\"" + outgoingEdges[index][i] + "\"]");
+          var color = "Orange";
+          if(binary_search(incomingEdges[index], outgoingEdges[index][i]))
+            color = "Purple";
+
+          outgoingNeighbourElement.style("fill", color).style("opacity", "1");
+        }
+
+        d3.select("[id=\"" + index + "\"]").style("fill", "Black").style("opacity", "1");
+    }
+
+    function undoHighlight(d, index) {
+        var numIncomingNeighbours = incomingEdges[index].length;
+        for (var i = 0; i < numIncomingNeighbours; ++i) {
+          var incomingNeighbourElement = d3.select("[id=\"" + incomingEdges[index][i] + "\"]");
+          incomingNeighbourElement.style("fill", "Wheat").style("opacity", "0.5");
+        }
+
+        var numOutgoingNeighbours = outgoingEdges[index].length;
+        for (var i = 0; i < numOutgoingNeighbours; ++i) {
+          var outgoingNeighbourElement = d3.select("[id=\"" + outgoingEdges[index][i] + "\"]");
+          outgoingNeighbourElement.style("fill", "Wheat").style("opacity", "0.5");
+        }
+        
+        d3.select("[id=\"" + index + "\"]").style("fill", "Wheat").style("opacity", "0.5");
+    }
+
+    function draw(data) {
+      "use strict";
+    
+      var defaultHighlightNode = data.highlightIndex; 
+      var numVertices = data.nodes.length, numEdges = data.links.length;
+      
+      for (var i = 0; i < numVertices; ++i) {
+        incomingEdges[i] = new Array();
+        outgoingEdges[i] = new Array();
+      }
+
+      for (var i = 0; i < numEdges; ++i) {
+        var source = data.links[i].source, target =  data.links[i].target;
+        incomingEdges[target].push(source);
+        outgoingEdges[source].push(target);
+      }
+
+      for (var i = 0; i < numVertices; ++i) {
+        incomingEdges[i].sort(function(a,b){return a-b;});
+        /*for (var j = 0; j < outgoingEdges[i].length; ++j) { 
+          if (binary_search(incomingEdges[i], outgoingEdges[i][j])) {
+            console.log('Bidirectional Edge:' + i + ' -> ' + outgoingEdges[i][j]);
+          }
+        }*/
+      }
+
+      var width = 3000, height = 3000;
+      
+      var svg = d3.select("body")
+        .append("svg")
+        .attr("width", width)
+        .attr("height", height);
+
+      var node = svg.selectAll("circle.node")
+        .data(data.nodes)
+        .enter()
+        .append("circle")
+          .attr("class", "node")
+          .attr("id", function(d, i) { return i; })
+          .attr("r", 12);
+
+          node.append("title")
+            .text(function(d) { return d.name; });
+
+      var link = svg.selectAll("line.link")
+        .data(data.links)
+        .enter()
+        .append("line")
+          .style("stroke", "black");
+          
+      var force = d3.layout.force()
+        .charge(-500)
+        .linkDistance(400)
+        .size([width, height])
+        .nodes(data.nodes)
+        .links(data.links)
+        .start();
+
+      force.on("tick", function() {
+        link.attr("x1", function(d) { return d.source.x; })
+            .attr("y1", function(d) { return d.source.y; })
+            .attr("x2", function(d) { return d.target.x; })
+            .attr("y2", function(d) { return d.target.y; });
+
+        node.attr("cx", function(d) { return d.x; })
+            .attr("cy", function(d) { return d.y; })
+      });
+
+      node.on("mouseover", function(d, index) {
+        undoHighlight(d, defaultHighlightNode); 
+        doHighlight(d, index);
+      });
+
+      node.on("mouseout", function(d, index) {
+        undoHighlight(d, index);
+        doHighlight(d, defaultHighlightNode); 
+      });
+
+      node.call(force.drag); 
+
+      doHighlight(data, defaultHighlightNode);
+    }
+  </script>
+</head>
+<body>
+  <script>
+    d3.json("data/mydata_indegree.json", draw);
+  </script>
+</body>
+</html>
