@@ -33,7 +33,7 @@ using namespace std;
 typedef long long LL;
 const double EPSILON = 1e-9;
 const double CONVERGENCETHRESHOLD = 1e-4;
-const double STEPSIZE = 1e-3;
+const double STEPSIZE = 1e-8;
 const double REGULARIZATIONCONSTANT = 1e-3;
 const int MODELTYPE_LINEAR_REGRESSION = 1;
 const int MODELTYPE_TANH_REGRESSION = 2;
@@ -49,14 +49,15 @@ char buff[MAX_BUFFER_LENGTH];
 const string TRAINING_FILE = "/home/arvind/track1/extraction_train.txt";
 const string VALIDATION_FILE = "/home/arvind/track1/extraction_validation.txt";
 const string PUBLIC_TESTING_FILE = "/home/arvind/track1/extraction_publictest.txt";
-const string PRIVATE_TESTING_FILE = "/home/arvind/track1/extraction_privatetest.txt";
-const string FEATURE_OUTPUT_FILE = "/home/arvind/track1/extraction_privatetest.txt";
+const string FEATURE_OUTPUT_FILE = "/home/arvind/track1/output.txt";
 char *ptr = NULL, *ptr2 = NULL;
 int modeltype = MODELTYPE_TANH_REGRESSION; 
 //set this numfeatures to 0 to compute from training file
-int numfeatures = 66 + 1; //Adding the 1 for the offset feature
+int numfeatures = 0; //Adding the 1 for the offset feature
 ofstream fout;
 int numberOfValidationPasses = 0;
+
+void Test(string file);
 
 void Initialize()
 {
@@ -84,19 +85,18 @@ void Initialize()
     fin.close();
     cout<<"INFO: NumFeatures was computed to be:"<<numfeatures<<" including the implicit offset feature"<<endl;
   }
- 
+
+  dbge(STEPSIZE); dbge(REGULARIZATIONCONSTANT);
+
   fout.open( FEATURE_OUTPUT_FILE.cs );
   fout<<"#File Iteration RMSE"<<endl;
 }
 
-void DoRegression(string file, int phase)
+void Train(string file)
 {
-  if(phase != PHASE_VALIDATION || numberOfValidationPasses == 0)
     cout<<"File:"<<file<<endl;
-
-  if(phase == PHASE_VALIDATION)numberOfValidationPasses++;
   
-  int iteration = -1, featureindex = 0;
+  int iteration = 0, featureindex = 0;
   clock_t start = clock();
   double error = 0.0, target = 0.0;
   bool isConverged = false;
@@ -110,54 +110,20 @@ void DoRegression(string file, int phase)
     {
       iteration++;
       
-      if(phase == PHASE_TRAINING)memcpy(prevtheta, theta, sizeof(theta));
+      memcpy(prevtheta, theta, sizeof(theta));
       fin.getline(buff, MAX_BUFFER_LENGTH);
-     
-      // Load features corresponding to the current line and 
-      // also add the offset feature with value of 1.0 
-      ptr = ptr2 = buff;
-      featureindex = 0;
+      stringstream sin(buff);
+      sin>>target;
       features[0] = 1.0;
-      while(*ptr)
-      {
-        if(*ptr == ' ' || *ptr == '\t')
-        {
-          *ptr = '\0';
-          if(featureindex == 0) { 
-            target = s2d(ptr2);
-            if(modeltype == MODELTYPE_LOGISTIC_REGRESSION && target < 0)
-              target = 0.0;
-          }
-          else features[featureindex] = s2d(ptr2); 
-          
-          ptr2 = ptr + 1;
-          featureindex++;
-        }
-        ptr++; 
-      }
-      
+      FOR(featureindex, 1, numfeatures + 1)sin>>features[featureindex];
+     
       //Compute yhat and other required terms for performing gradient descent
       double dotproduct = 0.0, weight = 1.0, fhat = 0.0;
       REP(i, numfeatures) dotproduct += theta[i] * features[i];
-      if(modeltype == MODELTYPE_TANH_REGRESSION)
-      {
         fhat = tanh(dotproduct);
-        weight = 1 - fhat * fhat; //use this only for training phase. avoiding an extra if statement here
-      }
-      else if(modeltype == MODELTYPE_LINEAR_REGRESSION)
-      {
-        fhat = dotproduct;
-      }
-      else if(modeltype == MODELTYPE_LOGISTIC_REGRESSION)
-      {
-        fhat = SAFESIGMOID(dotproduct);
-        weight = fhat * (1 - fhat);
-      }
+        weight = -1* (1 - fhat * fhat) * (target - fhat);
       
       error += (fhat - target) * (fhat - target);
-      if(phase == PHASE_TRAINING)
-      {
-        weight *= -1*(target - fhat);
         //Do gradient descent
         REP(i, numfeatures)theta[i] = prevtheta[i] - STEPSIZE * (weight * features[i] + REGULARIZATIONCONSTANT * prevtheta[i]);
         
@@ -167,44 +133,29 @@ void DoRegression(string file, int phase)
           isConverged = true;
           break;
         }
-      }
       
       if(isConverged)break;
       
-      //print the first five iterations in case of training and testing files because they will be entered only once
-      //print the first five iterations on validation set if this is the first validation phase
-      if(iteration < 5 && (phase != PHASE_VALIDATION || numberOfValidationPasses == 1))
-      {
-        dbg(iteration); dbge(target);
-        cout<<"Feature Values:";
-        REP(i, numfeatures)cout<<" "<<features[i];
-        cout<<endl;
-        cout<<"Feature Weights:";
-        REP(i, numfeatures)cout<<" "<<theta[i];
-        cout<<endl;
-        
-      }
-    
-
       if(iteration % 1000000 == 0)
       {
         cout<<"Time taken to process "<< iteration <<" lines is: "<<(double)(clock()-start)/(double)CLOCKS_PER_SEC<<" seconds"<<endl;
       }  
-
-      if(phase == PHASE_TRAINING && iteration % 5000000 == 0)
+      
+      if(iteration % 5000000 == 0)
       {
-        double rmse = iteration >= 5000000 ? sqrt(error / 5000000) : sqrt(error);
-        fout<< file << " " << iteration << " " << rmse << endl;
+        fout<< file << " " << iteration << " " << sqrt(error / 5000000) << endl;
         error = 0.0;
+        REP(i, numfeatures)cout<<" "<<theta[i]; cout<<endl;
         
-        DoRegression(VALIDATION_FILE, PHASE_VALIDATION);
+        Test(VALIDATION_FILE);
+        cout<<"File:"<<file<<endl;
       }
+      
     }
    
     fin.close();
     
-    if(phase != PHASE_TRAINING)break;
-    else if(isConverged) //evaluate performance on the validation set and do another pass over the training file
+    if(isConverged) //evaluate performance on the validation set and do another pass over the training file
     {
         cout<<"Convergence detected after "<<iteration<<" number of iterations over the training set"<<endl;
         cout<<"Feature Weights:";
@@ -215,18 +166,57 @@ void DoRegression(string file, int phase)
     }
   }
   
-  fout<< file << " " << iteration << " " << sqrt(error / iteration) << endl;
+}
+
+void Test(string file)
+{
+    cout<<"File:"<<file<<endl;
+
+  
+  int iteration = 0, featureindex = 0;
+  clock_t start = clock();
+  double error = 0.0, target = 0.0;
+  bool isConverged = false;
+  
+    ifstream fin(file.cs);
+    if(!fin.is_open()){cout<<"Could not open file:"<<file<<endl; exit(1);}
+    
+    while(!fin.eof())
+    {
+      iteration++;
+      
+      fin.getline(buff, MAX_BUFFER_LENGTH);
+      stringstream sin(buff);
+      sin>>target;
+      features[0] = 1.0;
+      FOR(featureindex, 1, numfeatures + 1)sin>>features[featureindex];
+       
+      //Compute yhat and other required terms for performing gradient descent
+      double dotproduct = 0.0, fhat = 0.0;
+      REP(i, numfeatures) dotproduct += theta[i] * features[i];
+        fhat = tanh(dotproduct);
+      
+      error += (fhat - target) * (fhat - target);
+      
+      if(iteration % 1000000 == 0)
+      {
+        cout<<"Time taken to process "<< iteration <<" lines is: "<<(double)(clock()-start)/(double)CLOCKS_PER_SEC<<" seconds"<<endl;
+      }  
+    }
+   
+    fin.close();
+    
+    fout<< file << " " << iteration << " " << sqrt(error / iteration) << endl;
 }
 
 int main()
 {
   Initialize();
 
-  DoRegression(TRAINING_FILE, PHASE_TRAINING);
-  DoRegression(TRAINING_FILE, PHASE_TESTING);
-  DoRegression(VALIDATION_FILE, PHASE_TESTING);
-  DoRegression(PUBLIC_TESTING_FILE, PHASE_TESTING);
-  DoRegression(PRIVATE_TESTING_FILE, PHASE_TESTING);
+  Train(TRAINING_FILE);
+  Test(TRAINING_FILE);
+  Test(VALIDATION_FILE);
+  Test(PUBLIC_TESTING_FILE);
  
   fout.close(); 
   return 0;
